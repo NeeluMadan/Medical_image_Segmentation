@@ -1,0 +1,3 @@
+UNet: Contains implementation for segmentation of Thoracic organs uisng u-net (2D)
+
+VNet: Contains implementation for segmentation of Thoracic organs uisng v-net (3D)
