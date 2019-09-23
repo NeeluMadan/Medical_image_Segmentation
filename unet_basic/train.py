@@ -12,8 +12,13 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from torchvision import transforms
-from data import SegThorDataset, Rescale, Normalize, ToTensor2
+from tensorboardX import SummaryWriter
 
+from data import SegThorDataset
+from utils import JointTransform2D, Rescale, ToTensor, Normalize
+
+logdir = os.makedirs("models/logs", exist_ok=True)
+writer = SummaryWriter(log_dir = logdir)
 
 def tensor_to_numpy(tensor):
     t_numpy = tensor.detach().cpu().numpy()
@@ -85,7 +90,7 @@ def dice_loss2(result, target, total_classes = 5):
     
     """
     epsilon = 1e-6
-    loss_label =  np.zeros(5)
+    loss_label =  np.zeros(total_classes)
     total_loss = 0
     for j in range(0, total_classes):
             result_square_sum = torch.sum(result[:, j, :, :])
@@ -95,11 +100,11 @@ def dice_loss2(result, target, total_classes = 5):
             dice_loss_per_class = 1 - dice
             total_loss += dice_loss_per_class
             
-            loss_label[j] = dice_loss_per_class/result.size(0)
+            loss_label[j] = dice_loss_per_class
             
             
     total_loss /= total_classes
-    total_loss /= result.size(0)
+    #total_loss /= result.size(0)
         
     return loss_label, total_loss
 
@@ -117,15 +122,18 @@ def dice_loss3(result, target, batch_size, total_classes = 5):
 
 def train(epochs, batch_size, learning_rate):
 
+    torch.manual_seed(1234)
+
     train_loader = torch.utils.data.DataLoader(
-        SegThorDataset("/home/WIN-UNI-DUE/smnemada/Master_Thesis/SegThor/data", phase='train',
+        SegThorDataset("/home/WIN-UNI-DUE/smnemada/Master_Thesis/SegThor/data/train", phase='train',
                        transform=transforms.Compose([
-                           Rescale(0.5),
+                           Rescale(1.0),
                            Normalize(),                           
-                           ToTensor2()
+                           ToTensor()
                        ])),
         batch_size=batch_size, shuffle=True)
 
+    '''
     # Loading validation data
     val_set = SegThorDataset("/home/WIN-UNI-DUE/smnemada/Master_Thesis/SegThor/data_val", phase='val',
                                    transform=transforms.Compose([
@@ -137,7 +145,7 @@ def train(epochs, batch_size, learning_rate):
     val_loader = torch.utils.data.DataLoader(dataset=val_set,
                                              batch_size=1,
                                              shuffle=False)
-
+    '''
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet().to(device)
@@ -147,8 +155,9 @@ def train(epochs, batch_size, learning_rate):
     #optimizer = adabound.AdaBound(params = model.parameters(), lr = 0.001, final_lr = 0.1)
     
     for epoch in range(epochs):
-        print('Epoch {}/{}'.format(epoch + 1, epochs))
-        print('-' * 10)
+        f = open('train_output.log', 'a')
+        f.write('Epoch {}/{}\n'.format(epoch + 1, epochs))
+        f.write('-' * 10)
         
         running_loss = 0.0
         running_loss_label = np.zeros(5) 
@@ -167,14 +176,20 @@ def train(epochs, batch_size, learning_rate):
                 running_loss_label[i] += loss_label[i]
 
         epoch_loss = running_loss / len(train_loader)
-        print("Total Dice Loss: {:.4f}\n".format(epoch_loss))
+        writer.add_scalar('Train/Loss', epoch_loss, epoch)
+        f.write("\n Total Dice Loss: {:.4f}\n".format(epoch_loss))
         epoch_loss_class = np.true_divide(running_loss_label, len(train_loader))
-        print("Dice per class: Background = {:.4f} Eusophagus = {:.4f}  Heart = {:.4f}  Trachea = {:.4f}  Aorta = {:.4f}\n".format(epoch_loss_class[0], epoch_loss_class[1], epoch_loss_class[2], epoch_loss_class[3], epoch_loss_class[4]))
+        f.write("Dice per class: Background = {:.4f} Eusophagus = {:.4f}  Heart = {:.4f}  Trachea = {:.4f}  Aorta = {:.4f}\n".format(epoch_loss_class[0], epoch_loss_class[1], epoch_loss_class[2], epoch_loss_class[3], epoch_loss_class[4]))
+        #f.write("Dice per class: Background = {:.4f} Eusophagus = {:.4f}\n".format(epoch_loss_class[0], epoch_loss_class[1]))
+        f.close()
 
         if epoch%4==0:
             os.makedirs("models", exist_ok=True)
             torch.save(model, "models/model.pt")
 
+    # export scalar data to JSON for external processing
+    writer.export_scalars_to_json("./all_scalars.json")
+    writer.close()
     os.makedirs("models", exist_ok=True)
     torch.save(model, "models/model.pt")
 
@@ -209,4 +224,4 @@ def evaluate_model(model, val_loader, val_set, epoch, device):
 
 
 if __name__ == "__main__":
-    train(epochs=50, batch_size=16, learning_rate=0.01)
+    train(epochs=50, batch_size=4, learning_rate=0.01)
